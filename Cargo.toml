@@ -1,0 +1,15 @@
+[package]
+name = "cmd-wrapper"
+version = "0.1.0"
+edition = "2024"
+
+authors = ["RenovZ <cgsixv@gmail.com>"]
+description = "A command wrapper with async support"
+license = "MIT"
+repository = "https://github.com/RenovZ/cmd-wrapper"
+readme = "README.md"
+keywords = ["command", "command-wrapper", "async", "tokio"]
+
+[dependencies]
+tokio = { version = "1.46", features = ["full"] }
+tracing = "0.1"
