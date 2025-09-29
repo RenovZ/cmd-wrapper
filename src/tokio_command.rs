@@ -7,6 +7,7 @@ use std::{
     task::{Context, Poll},
 };
 
+use derivative::Derivative;
 use tokio::{
     io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     process::{Child, Command},
@@ -91,7 +92,7 @@ impl TokioCommand {
     }
 
     #[instrument(level = "trace")]
-    pub async fn spawn(&mut self) -> Result<TokioProcessContext> {
+    pub async fn spawn(&mut self) -> Result<TokioCommandProcess> {
         let mut child = self.command.spawn()?;
 
         let stdin = child
@@ -128,7 +129,7 @@ impl TokioCommand {
             }
         });
 
-        Ok(TokioProcessContext {
+        Ok(TokioCommandProcess {
             stdin,
             stdout,
             stderr,
@@ -218,9 +219,14 @@ impl TokioCommand {
     }
 }
 
-pub struct TokioProcessContext {
+#[derive(Derivative)]
+#[derivative(Debug)]
+pub struct TokioCommandProcess {
+    #[derivative(Debug = "ignore")]
     pub stdin: Box<dyn AsyncWrite + Send + Unpin>,
+    #[derivative(Debug = "ignore")]
     pub stdout: Box<dyn AsyncRead + Send + Unpin>,
+    #[derivative(Debug = "ignore")]
     pub stderr: Box<dyn AsyncRead + Send + Unpin>,
     pub pid: u32,
     pub end_rx: Receiver<i32>,

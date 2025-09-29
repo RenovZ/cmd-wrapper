@@ -1,6 +1,6 @@
 [package]
 name = "cmd-wrapper"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 
 authors = ["RenovZ <cgsixv@gmail.com>"]
@@ -13,3 +13,4 @@ keywords = ["command", "command-wrapper", "async", "tokio"]
 [dependencies]
 tokio = { version = "1.46", features = ["full"] }
 tracing = "0.1"
+derivative = "2.2"

@@ -7,6 +7,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+use derivative::Derivative;
 use tracing::{error, instrument, warn};
 
 #[derive(Debug)]
@@ -85,7 +86,7 @@ impl StdCommand {
     }
 
     #[instrument(level = "trace")]
-    pub fn spawn(&mut self) -> Result<StdProcessContext> {
+    pub fn spawn(&mut self) -> Result<StdCommandProcess> {
         let mut child = self.command.spawn()?;
 
         let stdin = child
@@ -122,7 +123,7 @@ impl StdCommand {
             }
         });
 
-        Ok(StdProcessContext {
+        Ok(StdCommandProcess {
             stdin,
             stdout,
             stderr,
@@ -182,9 +183,14 @@ impl StdCommand {
     }
 }
 
-pub struct StdProcessContext {
+#[derive(Derivative)]
+#[derivative(Debug)]
+pub struct StdCommandProcess {
+    #[derivative(Debug = "ignore")]
     pub stdin: Box<dyn Write>,
+    #[derivative(Debug = "ignore")]
     pub stdout: Box<dyn Read>,
+    #[derivative(Debug = "ignore")]
     pub stderr: Box<dyn Read>,
     pub pid: u32,
     pub end_rx: Receiver<i32>,
