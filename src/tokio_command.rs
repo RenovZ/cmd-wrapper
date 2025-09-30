@@ -16,6 +16,8 @@ use tokio::{
 };
 use tracing::{instrument, warn};
 
+use crate::ProcessEnd;
+
 #[derive(Debug)]
 pub struct TokioCommand {
     command: Command,
@@ -113,15 +115,22 @@ impl TokioCommand {
 
         let pid = child.id().unwrap_or_default();
 
-        let (end_tx, end_rx) = oneshot::channel::<(Option<i32>, Option<io::Error>)>();
+        let (end_tx, end_rx) = oneshot::channel::<ProcessEnd>();
         let end_handler = tokio::spawn(async move {
             let end_msg = match child.wait().await {
-                Ok(status) if status.code() == Some(0) => (Some(0), None),
-                Ok(status) => (
-                    status.code(),
-                    Self::read_full_stderr_if_any(stderr).await.err(),
-                ),
-                Err(err) => (Some(-1), Some(err)),
+                Ok(status) => {
+                    if let Some(0) = status.code() {
+                        ProcessEnd::Success
+                    } else {
+                        let err = Self::read_full_stderr_if_any(stderr).await.err();
+                        if let Some(code) = status.code() {
+                            ProcessEnd::Failed(code, err)
+                        } else {
+                            ProcessEnd::Killed(err)
+                        }
+                    }
+                }
+                Err(err) => ProcessEnd::Error(err),
             };
 
             if let Err(err) = end_tx.send(end_msg) {
@@ -196,7 +205,7 @@ pub struct TokioCommandProcess {
     #[derivative(Debug = "ignore")]
     pub stdout: Box<dyn AsyncRead + Send + Unpin>,
     pub pid: u32,
-    pub end_rx: Receiver<(Option<i32>, Option<io::Error>)>,
+    pub end_rx: Receiver<ProcessEnd>,
     pub end_handler: JoinHandle<()>,
 }
 

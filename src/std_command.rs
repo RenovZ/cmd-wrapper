@@ -10,6 +10,8 @@ use std::{
 use derivative::Derivative;
 use tracing::{instrument, warn};
 
+use crate::ProcessEnd;
+
 #[derive(Debug)]
 pub struct StdCommand {
     command: Command,
@@ -107,12 +109,22 @@ impl StdCommand {
 
         let pid = child.id();
 
-        let (end_tx, end_rx) = mpsc::channel::<(Option<i32>, Option<io::Error>)>();
+        let (end_tx, end_rx) = mpsc::channel::<ProcessEnd>();
         let end_handler = thread::spawn(move || {
             let end_msg = match child.wait() {
-                Ok(status) if status.code() == Some(0) => (Some(0), None),
-                Ok(status) => (status.code(), Self::read_full_stderr_if_any(stderr).err()),
-                Err(err) => (Some(-1), Some(err)),
+                Ok(status) => {
+                    if let Some(0) = status.code() {
+                        ProcessEnd::Success
+                    } else {
+                        let err = Self::read_full_stderr_if_any(stderr).err();
+                        if let Some(code) = status.code() {
+                            ProcessEnd::Failed(code, err)
+                        } else {
+                            ProcessEnd::Killed(err)
+                        }
+                    }
+                }
+                Err(err) => ProcessEnd::Error(err),
             };
 
             if let Err(err) = end_tx.send(end_msg) {
@@ -187,7 +199,7 @@ pub struct StdCommandProcess {
     #[derivative(Debug = "ignore")]
     pub stdout: Box<dyn Read>,
     pub pid: u32,
-    pub end_rx: Receiver<(Option<i32>, Option<io::Error>)>,
+    pub end_rx: Receiver<ProcessEnd>,
     pub end_handler: JoinHandle<()>,
 }
 
