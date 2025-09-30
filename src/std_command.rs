@@ -8,7 +8,7 @@ use std::{
 };
 
 use derivative::Derivative;
-use tracing::{error, instrument, warn};
+use tracing::{instrument, warn};
 
 #[derive(Debug)]
 pub struct StdCommand {
@@ -102,31 +102,27 @@ impl StdCommand {
         let stderr = child
             .stderr
             .take()
-            .map(|s| Box::new(s) as Box<dyn Read>)
+            .map(|s| Box::new(s) as Box<dyn Read + Send>)
             .unwrap_or_else(|| Box::new(io::empty()));
 
         let pid = child.id();
 
-        let (end_tx, end_rx) = mpsc::channel::<i32>();
+        let (end_tx, end_rx) = mpsc::channel::<(Option<i32>, Option<io::Error>)>();
         let end_handler = thread::spawn(move || {
-            let exit_code = match child.wait() {
-                Ok(status) if status.code() == Some(0) => 0,
-                Ok(_) => 1,
-                Err(err) => {
-                    error!("waiting for child process failed: {err}");
-                    -1
-                }
+            let end_msg = match child.wait() {
+                Ok(status) if status.code() == Some(0) => (Some(0), None),
+                Ok(status) => (status.code(), Self::read_full_stderr_if_any(stderr).err()),
+                Err(err) => (Some(-1), Some(err)),
             };
 
-            if let Err(err) = end_tx.send(exit_code) {
-                warn!("receiver dropped before sending exit code: {err}");
+            if let Err(err) = end_tx.send(end_msg) {
+                warn!(?err, "receiver dropped before sending end msg");
             }
         });
 
         Ok(StdCommandProcess {
             stdin,
             stdout,
-            stderr,
             pid,
             end_rx,
             end_handler,
@@ -162,7 +158,7 @@ impl StdCommand {
         Ok(())
     }
 
-    pub fn read_full_stderr_if_any(stderr: &mut impl Read) -> Result<()> {
+    fn read_full_stderr_if_any<R: Read + Send>(mut stderr: R) -> Result<()> {
         let mut peek_buf = vec![0u8; 1024];
         let n = stderr.read(&mut peek_buf)?;
         if n == 0 {
@@ -190,10 +186,8 @@ pub struct StdCommandProcess {
     pub stdin: Box<dyn Write>,
     #[derivative(Debug = "ignore")]
     pub stdout: Box<dyn Read>,
-    #[derivative(Debug = "ignore")]
-    pub stderr: Box<dyn Read>,
     pub pid: u32,
-    pub end_rx: Receiver<i32>,
+    pub end_rx: Receiver<(Option<i32>, Option<io::Error>)>,
     pub end_handler: JoinHandle<()>,
 }
 

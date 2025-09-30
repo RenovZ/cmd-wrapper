@@ -14,7 +14,7 @@ use tokio::{
     sync::oneshot::{self, Receiver},
     task::JoinHandle,
 };
-use tracing::{error, instrument, warn};
+use tracing::{instrument, warn};
 
 #[derive(Debug)]
 pub struct TokioCommand {
@@ -113,26 +113,25 @@ impl TokioCommand {
 
         let pid = child.id().unwrap_or_default();
 
-        let (end_tx, end_rx) = oneshot::channel::<i32>();
+        let (end_tx, end_rx) = oneshot::channel::<(Option<i32>, Option<io::Error>)>();
         let end_handler = tokio::spawn(async move {
-            let exit_code = match child.wait().await {
-                Ok(status) if status.code() == Some(0) => 0,
-                Ok(status) => status.code().unwrap_or(-1),
-                Err(err) => {
-                    error!("waiting for child process failed: {err}");
-                    -1
-                }
+            let end_msg = match child.wait().await {
+                Ok(status) if status.code() == Some(0) => (Some(0), None),
+                Ok(status) => (
+                    status.code(),
+                    Self::read_full_stderr_if_any(stderr).await.err(),
+                ),
+                Err(err) => (Some(-1), Some(err)),
             };
 
-            if let Err(err) = end_tx.send(exit_code) {
-                warn!("receiver dropped before sending exit code: {err}");
+            if let Err(err) = end_tx.send(end_msg) {
+                warn!(?err, "receiver dropped before sending end msg");
             }
         });
 
         Ok(TokioCommandProcess {
             stdin,
             stdout,
-            stderr,
             pid,
             end_rx,
             end_handler,
@@ -168,7 +167,7 @@ impl TokioCommand {
         Ok(())
     }
 
-    pub async fn read_full_stderr_if_any(stderr: &mut (impl AsyncRead + Unpin)) -> Result<()> {
+    async fn read_full_stderr_if_any(mut stderr: impl AsyncRead + Unpin) -> Result<()> {
         let mut peek_buf = vec![0u8; 1024];
         let n = stderr.read(&mut peek_buf).await?;
         if n == 0 {
@@ -187,36 +186,6 @@ impl TokioCommand {
 
         Ok(())
     }
-
-    pub async fn read_bytes_with_stderr_check(
-        stdout: &mut (impl AsyncRead + Unpin),
-        stderr: &mut (impl AsyncRead + Unpin),
-    ) -> Result<Option<Vec<u8>>> {
-        let mut out_buf = vec![0u8; 32 << 10];
-        let mut err_buf = vec![0u8; 1024];
-
-        loop {
-            tokio::select! {
-                read_stdout = stdout.read(&mut out_buf) => {
-                    let n = read_stdout?;
-                    if n == 0 {
-                        return Ok(None);
-                    }
-                    out_buf.truncate(n);
-                    return Ok(Some(out_buf))
-                }
-                read_stderr = stderr.read(&mut err_buf) => {
-                    let n = read_stderr?;
-                    if n > 0 {
-                        let msg = str::from_utf8(&err_buf[..n]).map_err(Error::other)?.trim();
-                        if !msg.is_empty() {
-                            return Err(Error::other(msg));
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 #[derive(Derivative)]
@@ -226,10 +195,8 @@ pub struct TokioCommandProcess {
     pub stdin: Box<dyn AsyncWrite + Send + Unpin>,
     #[derivative(Debug = "ignore")]
     pub stdout: Box<dyn AsyncRead + Send + Unpin>,
-    #[derivative(Debug = "ignore")]
-    pub stderr: Box<dyn AsyncRead + Send + Unpin>,
     pub pid: u32,
-    pub end_rx: Receiver<i32>,
+    pub end_rx: Receiver<(Option<i32>, Option<io::Error>)>,
     pub end_handler: JoinHandle<()>,
 }
 

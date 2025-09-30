@@ -1,10 +1,10 @@
 [package]
 name = "cmd-wrapper"
-version = "0.1.1"
+version = "1.0.0"
 edition = "2024"
 
 authors = ["RenovZ <cgsixv@gmail.com>"]
-description = "A command wrapper with async support"
+description = "A command wrapped for easy use cases"
 license = "MIT"
 repository = "https://github.com/RenovZ/cmd-wrapper"
 readme = "README.md"
