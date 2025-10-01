@@ -24,9 +24,9 @@ pub struct TokioCommand {
 }
 
 impl TokioCommand {
-    pub fn new<S: Into<String>>(program: S) -> Self {
+    pub fn new<S: AsRef<OsStr>>(program: S) -> Self {
         Self {
-            command: Command::new(program.into()),
+            command: Command::new(program),
         }
     }
 
